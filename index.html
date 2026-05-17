@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>三北工程 · 绿色长城 | 沉浸式故事地图</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', 'Roboto', system-ui, sans-serif; background: #eef5ea; overflow: hidden; height: 100vh; }
+        .app { display: flex; flex-direction: column; height: 100vh; }
+        .top-bar { background: white; padding: 8px 24px; border-bottom: 2px solid #b0d9a3; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
+        .title-area { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; margin-bottom: 8px; }
+        .title h1 { font-size: 1.4rem; color: #1a5d3a; }
+        .title p { font-size: 0.7rem; color: #568f6b; }
+        .time-slider-wrapper { display: flex; align-items: center; gap: 15px; background: #f2faf0; padding: 5px 18px; border-radius: 40px; }
+        .time-slider-wrapper label { font-weight: 600; color: #2d6a4f; }
+        #timelineSlider { width: 240px; cursor: pointer; accent-color: #428b54; }
+        .year-label { background: #286b42; color: white; padding: 4px 14px; border-radius: 30px; font-size: 0.75rem; font-weight: bold; }
+        .step-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; border-top: 1px solid #d9ebd1; padding-top: 12px; }
+        .step-item { background: #ecf6e8; border-radius: 40px; padding: 6px 18px; font-size: 0.8rem; font-weight: 500; color: #396d4a; cursor: pointer; transition: 0.2s; display: flex; align-items: center; gap: 6px; border: 1px solid #cde2c2; }
+        .step-item.active { background: #3f8e5e; color: white; border-color: #2a6b45; box-shadow: 0 2px 8px rgba(63,142,94,0.3); }
+        .step-item.completed { background: #cae3be; color: #2b5b3b; }
+        .main-area { display: flex; flex: 1; min-height: 0; position: relative; }
+        #map { flex: 3; background-color: #d0e4c6; z-index: 1; }
+        .info-card { flex: 1; background: rgba(255,255,255,0.95); backdrop-filter: blur(4px); border-left: 1px solid #bcddae; padding: 1.2rem; overflow-y: auto; box-shadow: -4px 0 16px rgba(0,0,0,0.04); z-index: 2; }
+        .story-content h3 { color: #1c6e41; font-size: 1.3rem; margin-bottom: 0.75rem; border-left: 5px solid #69b578; padding-left: 12px; margin-top: 0; }
+        .story-content h4 { color: #2b7a4b; margin: 1rem 0 0.5rem 0; font-size: 1.1rem; }
+        .story-img { width: 100%; border-radius: 20px; margin: 12px 0; box-shadow: 0 4px 10px rgba(0,0,0,0.08); border: 1px solid #d4eac9; }
+        .stats-mini { background: #f4fcf0; border-radius: 20px; padding: 12px; margin: 12px 0; border-left: 4px solid #6aba7a; font-size: 0.9rem; }
+        .highlight { font-weight: bold; color: #1c6e41; background: #e9f5e6; display: inline-block; padding: 0 4px; border-radius: 8px; }
+        .bold-number { font-weight: bold; color: #2b7a4b; font-size: 1.05em; }
+        .transition-card { background: #e9f5e6; border-left: 4px solid #2b7a4b; border-radius: 16px; padding: 12px; margin: 16px 0; }
+        .gray-text { color: #7f8c8d; font-size: 0.75rem; text-align: center; margin-top: 8px; margin-bottom: 8px; }
+        .nav-buttons { display: flex; justify-content: space-between; gap: 12px; margin: 20px 0 10px; }
+        .nav-btn { background: #e3f0dd; border: none; padding: 8px 12px; border-radius: 40px; font-weight: 500; cursor: pointer; transition: 0.2s; color: #235b3a; flex: 1; text-align: center; }
+        .map-coords {
+            position: absolute;
+            bottom: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.6);
+            color: #eaf7e5;
+            padding: 4px 12px;
+            border-radius: 24px;
+            font-size: 0.7rem;
+            font-family: monospace;
+            z-index: 1000;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+        .intro-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background: #0a1f12; z-index:9999; display:flex; align-items:center; justify-content:center; transition:opacity 0.6s; }
+        .intro-slide { width:100%; height:100%; background-size:cover; background-position:center; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; color:white; padding:2rem; position:relative; }
+        .intro-overlay .overlay-dark { position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.55); z-index:0; }
+        .intro-caption { position:relative; z-index:2; max-width:800px; background:rgba(0,0,0,0.6); backdrop-filter:blur(8px); padding:1.2rem 2rem; border-radius:48px; border-left:6px solid #6fbf4c; margin-bottom:2rem; }
+        .intro-caption p { font-size:1.3rem; font-weight:500; }
+        .intro-controls { position:relative; z-index:2; display:flex; gap:20px; margin-top:30px; }
+        .intro-btn { background:#6fbf4c; border:none; padding:10px 28px; border-radius:60px; font-weight:bold; cursor:pointer; color:white; }
+        .intro-dots { position:relative; z-index:2; display:flex; gap:12px; margin-top:20px; }
+        .dot { width:10px; height:10px; border-radius:50%; background:rgba(255,255,255,0.5); cursor:pointer; }
+        .dot.active { background:#6fbf4c; width:24px; border-radius:10px; }
+        @media (max-width:800px) { .main-area { flex-direction: column; } #map { height: 55vh; } .info-card { max-height: 45vh; } .intro-caption p { font-size:1rem; } .map-coords { white-space: normal; font-size: 0.6rem; } }
+        
+        /* 图标样式 - 去除白底 */
+        .star-icon { background: #e74c3c; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 5px rgba(0,0,0,0.3); }
+        .star-icon i { color: #ffd700; font-size: 16px; }
+        .desert-icon { background: #a0522d; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        .desert-icon i { color: #fff; font-size: 12px; }
+        .sandy-icon { background: #f39c12; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        .sandy-icon i { color: #fff; font-size: 12px; }
+        .number-icon { background: #2ecc71; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 6px rgba(0,0,0,0.3); font-weight: bold; color: white; font-size: 14px; border: 2px solid white; }
+        .yellow-number-icon { background: #f7d44a; color: #2b5b3b; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; box-shadow: none; border: 1px solid #e0a800; }
+        .start-end-marker { background: #2b7a4b; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; box-shadow: none; }
+        .innovation-icon { background: #6fbf4c; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 5px rgba(0,0,0,0.3); color: white; font-size: 14px; border: 1px solid white; }
+        
+        .custom-legend {
+            background: rgba(255,255,255,0.94);
+            padding: 10px 14px;
+            border-radius: 24px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            font-size: 12px;
+            line-height: 1.6;
+            border-left: 4px solid #6aba7a;
+            transition: all 0.2s;
+        }
+        .legend-color { display: inline-block; width: 14px; height: 14px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+        .legend-rect { display: inline-block; width: 20px; height: 10px; opacity: 0.6; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
+        
+        /* 手风琴菜单 */
+        .accordion-item { margin-bottom: 12px; border-radius: 16px; background: #f9fff7; overflow: hidden; transition: all 0.2s; border: 1px solid #d4eac9; }
+        .accordion-header { background: #f0f7ec; padding: 10px 14px; cursor: pointer; font-weight: bold; display: flex; justify-content: space-between; align-items: center; color: #1c6e41; transition: 0.2s; }
+        .accordion-header:hover { background: #e6f5e0; }
+        .accordion-header .title { display: flex; align-items: center; gap: 8px; }
+        .accordion-header .arrow { transition: transform 0.2s; }
+        .accordion-item.active .accordion-header .arrow { transform: rotate(90deg); }
+        .accordion-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; background: white; padding: 0 16px; }
+        .accordion-item.active .accordion-content { max-height: 500px; padding: 12px 16px 20px; overflow-y: auto; }
+        .region-card-btn { border: none; padding: 6px 14px; border-radius: 40px; margin: 4px; cursor: pointer; transition: 0.2s; font-weight: 500; color: white; font-size: 0.85rem; }
+        .region-card-btn:hover { transform: translateY(-2px); filter: brightness(1.05); }
+        .btn-northwest { background: #5a9e6e; }
+        .btn-north { background: #3c8d5e; }
+        .btn-northeast { background: #2b7a4b; }
+        
+        .phase-table { width: 100%; border-collapse: collapse; margin: 16px 0; background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .phase-table th { background: #3f8e5e; color: white; padding: 8px; font-weight: 600; }
+        .phase-table td { padding: 8px; border-bottom: 1px solid #d4eac9; }
+        .phase-table tr:last-child td { border-bottom: none; }
+        .chart-container { height: 180px; margin: 12px 0; }
+        
+        /* 建设成效卡片网格 */
+        .achievement-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin: 16px 0;
+        }
+        .achievement-card {
+            background: #f4fcf0;
+            border-radius: 20px;
+            padding: 12px;
+            text-align: center;
+            border-left: 4px solid #6aba7a;
+            transition: 0.2s;
+        }
+        .achievement-label {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: #1c6e41;
+            margin-bottom: 6px;
+        }
+        .achievement-number {
+            font-size: 1.8rem;
+            font-weight: 800;
+            color: #2b7a4b;
+            display: block;
+            line-height: 1.2;
+            margin-bottom: 4px;
+        }
+        .achievement-sub {
+            font-size: 0.7rem;
+            color: #568f6b;
+        }
+        
+        .innovation-item {
+            margin-bottom: 12px;
+            border-radius: 16px;
+            background: #f9fff7;
+            overflow: hidden;
+            border: 1px solid #d4eac9;
+        }
+        .innovation-header {
+            background: #f0f7ec;
+            padding: 10px 14px;
+            cursor: pointer;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: #1c6e41;
+            transition: 0.2s;
+        }
+        .innovation-header:hover { background: #e6f5e0; }
+        .innovation-header .title { display: flex; align-items: center; gap: 8px; }
+        .innovation-header .arrow { transition: transform 0.2s; }
+        .innovation-item.active .innovation-header .arrow { transform: rotate(90deg); }
+        .innovation-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+            background: white;
+            padding: 0 16px;
+        }
+        .innovation-item.active .innovation-content {
+            max-height: 600px;
+            padding: 12px 16px 20px;
+            overflow-y: auto;
+        }
+        .locate-btn {
+            background: #6aba7a;
+            border: none;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 40px;
+            font-size: 0.7rem;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .locate-btn:hover { background: #2b7a4b; }
+        .img-grid { display: flex; gap: 8px; margin: 8px 0; }
+        .img-grid img { width: calc(50% - 4px); border-radius: 12px; }
+        .bold { font-weight: bold; color: #1c6e41; }
+        .goal-container { display: flex; flex-direction: column; gap: 12px; margin: 16px 0; }
+        .goal-item { background: #f4fcf0; border-radius: 20px; padding: 12px; border-left: 4px solid #2b7a4b; }
+        .summary-card { background: #e6f5e0; border-radius: 20px; padding: 16px; margin-top: 20px; border-left: 5px solid #2b7a4b; }
+    </style>
+</head>
+<body>
+<div class="app">
+    <div class="top-bar">
+        <div class="title-area">
+            <div class="title"><h1><i class="fas fa-tree"></i> 三北工程 · 绿色长城 | 故事地图</h1><p>从沙进人退到绿进沙退 | 四章叙事·地图漫游</p></div>
+            <div class="time-slider-wrapper"><label><i class="far fa-clock"></i> 时空长廊</label><input type="range" id="timelineSlider" min="0" max="3" step="1" value="0"><span id="timeLabel" class="year-label">第一章 · 危机</span></div>
+        </div>
+        <div class="step-nav" id="stepNav"></div>
+    </div>
+    <div class="main-area">
+        <div id="map"></div>
+        <div class="info-card">
+            <div class="story-content" id="dynamicStory"></div>
+            <div class="nav-buttons" id="globalNavButtons">
+                <button id="prevChapterBtn" class="nav-btn"><i class="fas fa-arrow-left"></i> 上一章</button>
+                <button id="nextChapterBtn" class="nav-btn">下一章 <i class="fas fa-arrow-right"></i></button>
+            </div>
+            <div class="nav-buttons" id="subStepButtons" style="display:none;">
+                <button id="prevSubBtn" class="nav-btn"><i class="fas fa-arrow-left"></i> 上一步</button>
+                <button id="nextSubBtn" class="nav-btn">下一步 <i class="fas fa-arrow-right"></i></button>
+            </div>
+        </div>
+        <div class="map-coords" id="coordDisplay">🗺️ 经纬度范围: -- | 缩放: --</div>
+    </div>
+</div>
+
+<!-- 开场动画 -->
+<div id="introOverlay" class="intro-overlay">
+    <div class="intro-slide" id="introSlide">
+        <div class="overlay-dark"></div>
+        <div class="intro-caption" id="introCaption"><p id="introText">在祖国北疆，一道绵延4480公里的绿色长城，横亘西北、华北、东北，锁住漫天黄沙，守护万里河山，缔造出世界生态工程的奇迹。</p></div>
+        <div class="intro-controls">
+            <button id="introPrevBtn" class="intro-btn" style="background:#3f6b3a;"><i class="fas fa-chevron-left"></i> 上一页</button>
+            <button id="introNextBtn" class="intro-btn">下一页 <i class="fas fa-chevron-right"></i></button>
+            <button id="introSkipBtn" class="intro-btn" style="background:#7a8e7a;">跳过</button>
+        </div>
+        <div class="intro-dots" id="introDots"></div>
+    </div>
+</div>
+
+<script>
+    // ======================= 地图初始化 =======================
+    const map = L.map('map').setView([36, 102], 3.5);
+    map.setMaxBounds([[-5, 60], [60, 150]]);
+    L.tileLayer('https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}', {
+        attribution: '&copy; 高德地图', subdomains: ['1','2','3','4'], maxZoom: 18
+    }).addTo(map);
+    function updateCoord() { const b=map.getBounds(); document.getElementById('coordDisplay').innerHTML=`🗺️ 经 ${b.getWest().toFixed(1)}~${b.getEast().toFixed(1)} | 纬 ${b.getSouth().toFixed(1)}~${b.getNorth().toFixed(1)} | 缩放 ${map.getZoom()}`; }
+    map.on('moveend', updateCoord); updateCoord();
+    L.control.scale({ imperial: false }).addTo(map);
+    
+    // 起止点（保留地图上的标记和连线，右侧文字已删除）
+    let startEndLayer = null;
+    function addStartEndPoints() {
+        if (startEndLayer && map.hasLayer(startEndLayer)) return;
+        startEndLayer = L.layerGroup();
+        const eastPoint = [45.75, 127.8333];
+        const westPoint = [39.5, 73.4333];
+        L.marker(eastPoint, { icon: L.divIcon({ html: '<div class="start-end-marker">东</div>', className: 'start-end-wrapper', iconSize: [20,20] }) }).bindPopup("三北工程东端起点<br>黑龙江省宾县").addTo(startEndLayer);
+        L.marker(westPoint, { icon: L.divIcon({ html: '<div class="start-end-marker">西</div>', className: 'start-end-wrapper', iconSize: [20,20] }) }).bindPopup("三北工程西端终点<br>新疆乌孜别里山口").addTo(startEndLayer);
+        const line = L.polyline([eastPoint, westPoint], { color: "#f7d44a", weight: 3, dashArray: "10, 6", opacity: 0.8 });
+        line.addTo(startEndLayer);
+        const mid = [(eastPoint[0]+westPoint[0])/2, (eastPoint[1]+westPoint[1])/2];
+        L.marker(mid, { icon: L.divIcon({ html: '<div style="background:rgba(0,0,0,0.6); color:white; padding:2px 6px; border-radius:20px; font-size:12px; white-space:nowrap;">4480 km</div>', iconSize:[60,20] }) }).addTo(startEndLayer);
+        startEndLayer.addTo(map);
+    }
+    function removeStartEndPoints() { if (startEndLayer && map.hasLayer(startEndLayer)) map.removeLayer(startEndLayer); }
+    
+    // ========== 沙漠/沙地/黄河图层 ==========
+    let desertAreaLayer = null, sandyLandLayer = null;
+    function loadDesertAreas() {
+        if (desertAreaLayer && map.hasLayer(desertAreaLayer)) return;
+        fetch("https://www.geosceneonline.cn/server/rest/services/Hosted/%E6%88%91%E5%9B%BD%E6%B2%99%E6%BC%A0%E5%88%86%E5%B8%83_WFL1/FeatureServer/1/query?where=1%3D1&outFields=*&returnGeometry=true&f=geojson")
+            .then(res => res.json())
+            .then(geojson => {
+                desertAreaLayer = L.geoJSON(geojson, { style: { color: "#a0522d", weight: 1.5, fillColor: "#c45a2c", fillOpacity: 0.5 }, onEachFeature: (f,l) => { let name = f.properties?.NAME || f.properties?.name || "沙漠"; l.bindPopup(`<b>🏜️ ${name}</b><br>中国主要沙漠`); } });
+                desertAreaLayer.addTo(map);
+            })
+            .catch(e => console.warn("沙漠面加载失败", e));
+    }
+    function removeDesertAreas() { if (desertAreaLayer && map.hasLayer(desertAreaLayer)) map.removeLayer(desertAreaLayer); }
+    function loadSandyLands() {
+        if (sandyLandLayer && map.hasLayer(sandyLandLayer)) return;
+        fetch("https://www.geosceneonline.cn/server/rest/services/Hosted/%E6%88%91%E5%9B%BD%E6%B2%99%E6%BC%A0%E5%88%86%E5%B8%83_WFL1/FeatureServer/0/query?where=1%3D1&outFields=*&returnGeometry=true&f=geojson")
+            .then(res => res.json())
+            .then(geojson => {
+                sandyLandLayer = L.geoJSON(geojson, { style: { color: "#e67e22", weight: 1.5, fillColor: "#f39c12", fillOpacity: 0.45 }, onEachFeature: (f,l) => { let name = f.properties?.NAME || f.properties?.name || "沙地"; l.bindPopup(`<b>🌾 ${name}</b><br>中国主要沙地`); } });
+                sandyLandLayer.addTo(map);
+            })
+            .catch(e => console.warn("沙地面加载失败", e));
+    }
+    function removeSandyLands() { if (sandyLandLayer && map.hasLayer(sandyLandLayer)) map.removeLayer(sandyLandLayer); }
+    let yellowRiverLayer = null;
+    function loadYellowRiver() {
+        if (yellowRiverLayer && map.hasLayer(yellowRiverLayer)) return;
+        fetch("https://www.geosceneonline.cn/server/rest/services/Hosted/%E9%BB%84%E6%B2%B3huang/FeatureServer/0/query?where=1%3D1&outFields=*&returnGeometry=true&f=geojson")
+            .then(res => res.json())
+            .then(geojson => {
+                yellowRiverLayer = L.geoJSON(geojson, { style: { color: "#3b82f6", weight: 2.5, opacity: 0.9 }, onEachFeature: (f,l) => l.bindPopup("<b>🌊 黄河干流</b><br>三北工程重点治理流域") });
+                yellowRiverLayer.addTo(map);
+            })
+            .catch(e => console.warn("黄河图层加载失败", e));
+    }
+    function removeYellowRiver() { if (yellowRiverLayer && map.hasLayer(yellowRiverLayer)) map.removeLayer(yellowRiverLayer); }
+    
+    // 风沙路径
+    let sandPathLayer = null;
+    function showSandStormPath() {
+        if (sandPathLayer && map.hasLayer(sandPathLayer)) return;
+        sandPathLayer = L.layerGroup();
+        const path1 = [[44.0, 106.0], [42.5, 112.0], [41.0, 114.5], [39.9, 116.4]];
+        const path2 = [[43.0, 115.5], [41.8, 115.8], [40.5, 116.2], [39.9, 116.4]];
+        const path3 = [[39.0, 96.0], [40.5, 105.0], [40.0, 112.0], [39.9, 116.4]];
+        L.polyline(path1, { color: "#f7d44a", weight: 2.5, dashArray: "6,6", opacity: 0.8 }).addTo(sandPathLayer);
+        L.polyline(path2, { color: "#f7d44a", weight: 2.5, dashArray: "6,6", opacity: 0.8 }).addTo(sandPathLayer);
+        L.polyline(path3, { color: "#f7d44a", weight: 2.5, dashArray: "6,6", opacity: 0.8 }).addTo(sandPathLayer);
+        L.marker([44.0,106.0], { icon: L.divIcon({ html:'<div class="yellow-number-icon">1</div>', iconSize:[28,28] }) }).bindPopup("① 西北主路源头<br>蒙古戈壁").addTo(sandPathLayer);
+        L.marker([43.0,115.5], { icon: L.divIcon({ html:'<div class="yellow-number-icon">2</div>', iconSize:[28,28] }) }).bindPopup("② 北路近源<br>浑善达克沙地").addTo(sandPathLayer);
+        L.marker([39.0,96.0], { icon: L.divIcon({ html:'<div class="yellow-number-icon">3</div>', iconSize:[28,28] }) }).bindPopup("③ 西路远源<br>河西走廊戈壁").addTo(sandPathLayer);
+        sandPathLayer.addTo(map);
+    }
+    function removeSandStormPath() { if (sandPathLayer && map.hasLayer(sandPathLayer)) map.removeLayer(sandPathLayer); }
+    
+    // 第二章治沙典范点
+    const casePoints = [
+        { id:1, name: "新疆阿克苏柯柯牙", lat: 41.17, lng: 80.25, 
+          desc: "荒漠变绿洲奇迹，锁住塔克拉玛干沙漠北缘。<br><br><strong>🌟 人物事迹：依马木·麦麦提</strong><br>柯柯牙三北防护林管理站首任站长，1986年从塔里木大学果树栽培教师岗位主动请缨治沙。面对含盐量9.87%的戈壁盐碱地，他带领3名护林员住地窝子、啃干馕，摸索出“压碱排碱、沟植造林”核心技术，用钢钎、炸药炸开硬土层，将树苗成活率从不足10%提升至85%以上。30多年间带领造林130万亩，实现三代人治沙接力，柯柯牙获评联合国“全球500佳境”。", 
+          year: "1986-2020", img: "./image/31.jpg" },
+        { id:2, name: "甘肃古浪八步沙", lat: 37.55, lng: 103.65, 
+          desc: "六老汉三代人治沙典范，阻断腾格里沙漠南侵。<br><br><strong>🌟 人物事迹：八步沙“六老汉”三代人</strong><br>1981年，郭朝明等六位年过半百的农民按下红手印，承包7.5万亩流沙，用扎草方格、人工运水等原始方法治沙，临终前均叮嘱子女“把沙治下去”。第二代郭万刚放弃城里工作接力，创新“工程固沙+生物治沙”模式，引入无人机造林技术。40多年累计治沙21.7万亩，植被覆盖率从不足3%升至70%，筑起腾格里沙漠南缘“绿色长城”，获“时代楷模”称号。", 
+          year: "1981-2020", img: "./image/321.jpg" },
+        { id:3, name: "宁夏中卫沙坡头", lat: 37.52, lng: 105.03, 
+          desc: "首创草方格固沙技术，保障包兰铁路畅通。<br><br><strong>🌟 人物事迹：唐希明</strong><br>中卫市国有林业总场正高级工程师，1991年毕业后主动参与包兰铁路治沙工程。为解决“铁路死亡线”风沙掩埋难题，他扎根沙漠研究流沙规律，发明“干”字形铁制植苗工具和水分传导式精准植苗技术，造林效率提高1倍，成活率从不足50%升至85%以上，为国家节省资金6000余万元。34年参与治沙超150万亩，让腾格里沙漠中卫段后退25公里，技术被全国沙区推广。", 
+          year: "1950s-2020", img: "./image/33.jpg" },
+        { id:4, name: "内蒙古库布其沙漠", lat: 40.50, lng: 108.60, 
+          desc: "全球沙漠生态修复标杆，实现治沙、产业一体化。<br><br><strong>🌟 人物事迹：白七劳</strong><br>鄂尔多斯达拉特旗柴登嘎查原党支部书记。20世纪80年代，面对库布其沙漠每年10米的北侵速度，他带头砸锅卖铁筹集树苗，带领全村村民在沙漠边缘栽下16公里长的锁边林。此后30多年放弃城里工作专职护林，这条林带最终扩展为420公里的防风阻沙锁边林带，推动库布其沙漠治理率达40%，入黄泥沙量大幅减少。", 
+          year: "1988-2020", img: "./image/34.jpg" },
+        { id:5, name: "河北塞罕坝林场", lat: 42.40, lng: 117.20, 
+          desc: "京津冀生态屏障，百万亩林海阻挡沙地南下。<br><br><strong>🌟 人物事迹：王尚海、陈彦娴</strong><br>1962年，原承德地区农业局长王尚海主动请缨任塞罕坝机械林场首任党委书记，带领369名平均年龄不到24岁的青年，在零下40多度的严寒中攻克高寒地区造林难题，创造“马蹄坑造林法”，实现1000亩造林成活率90%以上的奇迹。陈彦娴等“六女”放弃高考上坝坚守，一家三代扎根林场。三代人累计造林112万亩，森林覆盖率从11.4%升至82%，每年为京津涵养水源2.84亿立方米，获联合国“地球卫士奖”。", 
+          year: "1962-2020", img: "./image/36.jpg" }
+    ];
+    let secondChapterMarkers = L.layerGroup();
+    let connectionLine = null;
+    function createNumberIcon(num) { return L.divIcon({ html: `<div class="number-icon">${num}</div>`, className: 'number-icon-wrapper', iconSize: [30,30], popupAnchor: [0,-15] }); }
+    function buildSecondChapter() {
+        casePoints.forEach(p => {
+            L.marker([p.lat, p.lng], { icon: createNumberIcon(p.id) })
+                .bindPopup(`<b>${p.name}</b><br>📅 ${p.year}<br><img src="${p.img}" width="100%" style="border-radius:12px; margin-top:8px;"><br>${p.desc}`)
+                .addTo(secondChapterMarkers);
+        });
+        const pointsCoords = casePoints.map(p => [p.lat, p.lng]);
+        connectionLine = L.polyline(pointsCoords, { color: "#f7d44a", weight: 3, opacity: 0.8, dashArray: "8,6" }).addTo(secondChapterMarkers);
+    }
+    
+    // 三大战役多边形
+    let battleLayer = L.layerGroup();
+    function createBattleZones() {
+        const yellowRiverCoords = [[38.5,105.5],[38.0,107.0],[37.5,108.5],[38.0,110.0],[39.0,111.0],[40.0,111.0],[40.5,109.5],[40.8,107.5],[40.2,106.5],[38.5,105.5]];
+        const yellowRiverPoly = L.polygon(yellowRiverCoords, { color: "#e63946", weight: 2.5, fillColor: "#f4a261", fillOpacity: 0.3 });
+        yellowRiverPoly.bindPopup("<b>黄河“几字弯”攻坚战</b><br>涵盖宁夏、内蒙古、陕西、山西四省区，减少入黄泥沙。");
+        yellowRiverPoly.on('click', function() { this.openPopup(); });
+        battleLayer.addLayer(yellowRiverPoly);
+        
+        const horqinCoords = [[45.0,118.5],[44.5,121.0],[43.0,121.0],[42.5,119.0],[43.0,116.5],[44.5,115.5],[45.0,118.5]];
+        const horqinPoly = L.polygon(horqinCoords, { color: "#f4a261", weight: 2.5, fillColor: "#e9c46a", fillOpacity: 0.3 });
+        horqinPoly.bindPopup("<b>科尔沁、浑善达克沙地歼灭战</b><br>涵盖内蒙古赤峰、通辽、锡林郭勒，锁边治理。");
+        horqinPoly.on('click', function() { this.openPopup(); });
+        battleLayer.addLayer(horqinPoly);
+        
+        const hexiCoords = [[42.5,94.0],[41.5,96.0],[40.5,98.0],[39.5,100.0],[38.5,102.0],[37.5,100.0],[38.0,95.0],[39.0,85.0],[41.0,82.0],[42.5,85.0],[42.5,94.0]];
+        const hexiPoly = L.polygon(hexiCoords, { color: "#2a9d8f", weight: 2.5, fillColor: "#6abf69", fillOpacity: 0.25 });
+        hexiPoly.bindPopup("<b>河西走廊—塔克拉玛干沙漠边缘阻击战</b><br>涵盖甘肃河西走廊及新疆沙漠边缘，阻沙固边。");
+        hexiPoly.on('click', function() { this.openPopup(); });
+        battleLayer.addLayer(hexiPoly);
+    }
+    
+    // 沙漠/沙地点标记
+    let desertMarkers = L.layerGroup();
+    const beijingMarker = L.marker([39.9042, 116.4074], { 
+        icon: L.divIcon({ html: '<div class="star-icon"><i class="fas fa-star"></i></div>', className: 'star-icon-wrapper', iconSize: [28,28], popupAnchor: [0,-14] })
+    }).bindPopup(`
+        <b>🏛️ 1978 · 北京 · 工程启动</b><br>
+        · 在此背景下，我国北方生态持续恶化，沙尘灾害频发。以首都北京为例，1978 年当地全年沙尘天气多达 20 余天，来自蒙古高原与内蒙古沙地的风沙沿三大路径直逼首都，敲响生态警钟。<br>
+        <strong>三大传输路径：</strong><br>
+        1️⃣ 西北主路：蒙古戈壁→内蒙古朱日和→张家口直入北京，强度最大。<br>
+        2️⃣ 北路近源：浑善达克沙地→坝上草原→入京，距离最近。<br>
+        3️⃣ 西路远源：新疆河西走廊→鄂尔多斯沙地→山西大同汇入北京。<br>
+        <strong>核心根源：</strong>蒙古高原与内蒙古四大沙地，无植被屏障，冷空气南下即可长驱直入侵袭北京。
+    `);
+    let northwestRegion=null, northRegion=null, northeastRegion=null;
+    let activeRegionLayer = null;
+    
+    function createDesertMarkerIcon() { return L.divIcon({ html: `<div class="desert-icon"><i class="fas fa-mountain"></i></div>`, iconSize: [22,22], popupAnchor: [0,-11], className: 'desert-marker' }); }
+    function createSandyMarkerIcon() { return L.divIcon({ html: `<div class="sandy-icon"><i class="fas fa-grass"></i></div>`, iconSize: [22,22], popupAnchor: [0,-11], className: 'sandy-marker' }); }
+    const desertPointList = [
+        { name: "塔克拉玛干沙漠", lat: 38.5, lng: 82.5, desc: "中国最大沙漠", type: "desert" },
+        { name: "古尔班通古特沙漠", lat: 45.0, lng: 85.5, desc: "北疆固定半固定沙漠", type: "desert" },
+        { name: "巴丹吉林沙漠", lat: 40.5, lng: 102.5, desc: "世界最高沙丘", type: "desert" },
+        { name: "腾格里沙漠", lat: 38.5, lng: 104.5, desc: "六老汉治沙地", type: "desert" },
+        { name: "乌兰布和沙漠", lat: 40.2, lng: 106.5, desc: "黄河沿岸沙漠", type: "desert" },
+        { name: "库布其沙漠", lat: 40.5, lng: 108.6, desc: "光伏治沙典范", type: "desert" },
+        { name: "毛乌素沙地", lat: 38.8, lng: 109.5, desc: "已基本治理", type: "sandy" },
+        { name: "浑善达克沙地", lat: 42.8, lng: 115.5, desc: "京津风沙源", type: "sandy" },
+        { name: "科尔沁沙地", lat: 43.2, lng: 121.5, desc: "东北生态屏障", type: "sandy" }
+    ];
+    function buildDesertMarkers() { 
+        desertPointList.forEach(p => { 
+            let icon = p.type === "desert" ? createDesertMarkerIcon() : createSandyMarkerIcon();
+            L.marker([p.lat, p.lng], { icon: icon }).bindPopup(`<b>${p.name}</b><br>${p.desc}`).addTo(desertMarkers); 
+        }); 
+    }
+    
+    // 三北边界
+    const boundaryUrl = "https://www.geosceneonline.cn/server/rest/services/Hosted/三北/FeatureServer/0/query?where=1%3D1&outFields=*&returnGeometry=true&f=geojson";
+    fetch(boundaryUrl).then(res=>res.json()).then(geojson=>{
+        L.geoJSON(geojson, { style: { color: "#4caf7f", weight: 2, fillColor: "#b6e0b0", fillOpacity: 0.2 }, onEachFeature: (f,l) => { l.bindPopup("<b>三北工程区</b><br>中国北方生态屏障"); } }).addTo(map);
+        const nw=[], nc=[], ne=[];
+        geojson.features.forEach(f=>{
+            const centroid = turf.centroid(f);
+            const [lng, lat] = centroid.geometry.coordinates;
+            if(lng>=73 && lng<108 && lat>=34) nw.push(f);
+            else if(lng>=108 && lng<120 && lat>=36) nc.push(f);
+            else if(lng>=110 && lng<=130 && lat>=40) ne.push(f);
+            else nw.push(f);
+        });
+        northwestRegion = L.geoJSON({type:"FeatureCollection", features:nw}, { style: { color: "#5a9e6e", weight: 2, fillColor: "#a8e0b0", fillOpacity: 0.35 }, onEachFeature: (f,l) => { l.bindPopup(`<b>🌾 西北荒漠区</b><br>📌 涵盖：新疆、甘肃、青海、宁夏、陕西北部、内蒙古西部<br>🌤️ 气候：极端干旱，年降水<200mm，蒸发量10-30倍<br>⚠️ 问题：流动沙丘、风沙危害、水资源短缺<br>🔧 重点：沙漠边缘锁边，天然植被封禁，光伏治沙，特色林果`); } });
+        northRegion = L.geoJSON({type:"FeatureCollection", features:nc}, { style: { color: "#3c8d5e", weight: 2, fillColor: "#90d0a0", fillOpacity: 0.35 }, onEachFeature: (f,l) => { l.bindPopup(`<b>⛰️ 黄土高原水土流失区</b><br>📌 涵盖：山西、陕西中北部、甘肃中东部、宁夏南部、青海东部<br>🌤️ 气候：半干旱，降水集中多暴雨，水土流失剧烈<br>⚠️ 问题：黄河泥沙主要来源，植被退化<br>🔧 重点：加强黄河“几字弯”攻坚战，生物与工程措施结合，水土保持林`); } });
+        northeastRegion = L.geoJSON({type:"FeatureCollection", features:ne}, { style: { color: "#2b7a4b", weight: 2, fillColor: "#78c890", fillOpacity: 0.35 }, onEachFeature: (f,l) => { l.bindPopup(`<b>🌲 东北华北平原农区</b><br>📌 涵盖：北京、天津、河北、山西东部、内蒙古东部、辽宁、吉林、黑龙江<br>🌤️ 气候：温带季风，雨热同期，粮食主产区<br>⚠️ 问题：农田防护林老化，黑土流失，草原退化<br>🔧 重点：黑土地保护，京津冀生态屏障，农田防护林网，盐碱地治理`); } });
+    }).catch(e=>console.warn("边界加载失败",e));
+    
+    // 动态图例
+    let legendControl = null;
+    function updateLegendForChapter(chapterIndex, subStepIndex = null) {
+        if (legendControl) map.removeControl(legendControl);
+        let legendHtml = `<div class="custom-legend">`;
+        if (chapterIndex === 0) {
+            if (subStepIndex === 0) {
+                legendHtml += `<div><span class="legend-rect" style="background:#c45a2c;"></span> 沙漠分布区</div><div><span class="legend-rect" style="background:#f39c12;"></span> 沙地分布区</div>`;
+                legendHtml += `<div><span class="legend-color" style="background:#a0522d;"></span> 沙漠点标记</div><div><span class="legend-color" style="background:#f39c12;"></span> 沙地点标记</div>`;
+            } else if (subStepIndex === 1) {
+                legendHtml += `<div><span class="legend-color" style="background:#e74c3c;"></span> 决策地 · 北京</div><div><span class="legend-color" style="background:#f7d44a;"></span> 风沙路径及源头</div>`;
+            } else if (subStepIndex === 2) {
+                legendHtml += `<div><span class="legend-color" style="background:#5a9e6e;"></span> 西北荒漠区</div><div><span class="legend-color" style="background:#3c8d5e;"></span> 黄土高原区</div><div><span class="legend-color" style="background:#2b7a4b;"></span> 东北华北农区</div>`;
+            } else if (subStepIndex === 3) legendHtml += `<div><i class="fas fa-chart-line"></i> 规划图表</div>`;
+        } else if (chapterIndex === 1) {
+            if (subStepIndex === 0) legendHtml += `<div><span class="legend-color" style="background:#2ecc71;"></span> 治沙典范点</div><div><span style="display:inline-block; width:20px; height:3px; background:#f7d44a;"></span> 东西串联路线</div>`;
+            else legendHtml += `<div><i class="fas fa-chart-line"></i> 建设成效图表</div>`;
+        } else if (chapterIndex === 2) {
+            legendHtml += `<div><span class="legend-color" style="background:#e63946;"></span> 黄河“几字弯”</div><div><span class="legend-color" style="background:#f4a261;"></span> 科尔沁·浑善达克</div><div><span class="legend-color" style="background:#2a9d8f;"></span> 河西走廊—塔克拉玛干</div><div><span style="display:inline-block; width:20px; height:3px; background:#3b82f6;"></span> 黄河干流</div>`;
+        } else if (chapterIndex === 3) {
+            legendHtml += `<div><span class="legend-color" style="background:#6fbf4c;"></span> 创新模式地标</div>`;
+            legendHtml += `<div><i class="fas fa-chart-line"></i> 碳汇预测</div><div><i class="fas fa-seedling"></i> 未来愿景</div>`;
+        }
+        legendHtml += `<div><i class="fas fa-draw-polygon" style="color:#4caf7f;"></i> 三北工程区</div></div>`;
+        legendControl = L.control({ position: 'bottomright' });
+        legendControl.onAdd = function() { const div = L.DomUtil.create('div', 'info legend'); div.innerHTML = legendHtml; return div; };
+        legendControl.addTo(map);
+    }
+    
+    // 第四章创新模式地标
+    let innovationMarkers = L.layerGroup();
+    function addInnovationMarkers() {
+        if (innovationMarkers && map.hasLayer(innovationMarkers)) return;
+        const sites = [
+            { name: "🔆 库布其沙漠光伏长城", lat: 40.5, lng: 108.6, desc: "全国单体最大光伏治沙项目，200万千瓦", img: "./image/light.jpg" },
+            { name: "💧 张掖高台县中水回用造林", lat: 39.4, lng: 99.8, desc: "中水变废为宝，林木成活率90%以上", img: "./image/42.jpg" },
+            { name: "🌱 中卫草方格沙结皮技术", lat: 37.5, lng: 105.1, desc: "草方格+蓝藻沙结皮，施工效率提高60%", img: "./image/43.png" },
+            { name: "❄️ 大庆极寒盐碱地治理", lat: 46.6, lng: 125.1, desc: "植被盖度从48%提升至75%，全球方案", imgBefore: "./image/442.jpg", imgAfter: "./image/44.jpg" }
+        ];
+        sites.forEach(site => {
+            const icon = L.divIcon({ html: `<div class="innovation-icon"><i class="fas fa-map-marker-alt"></i></div>`, className: 'innovation-icon-wrapper', iconSize: [28,28] });
+            let popupContent = `<b>${site.name}</b><br>${site.desc}`;
+            if (site.img) popupContent += `<br><img src="${site.img}" width="100%" style="border-radius:12px; margin-top:8px;">`;
+            if (site.imgBefore && site.imgAfter) popupContent += `<div class="img-grid"><img src="${site.imgBefore}"><img src="${site.imgAfter}"></div>`;
+            L.marker([site.lat, site.lng], { icon: icon }).bindPopup(popupContent).addTo(innovationMarkers);
+        });
+        innovationMarkers.addTo(map);
+    }
+    function removeInnovationMarkers() { if (innovationMarkers && map.hasLayer(innovationMarkers)) map.removeLayer(innovationMarkers); }
+    
+    // ======================= 第一章子步骤 =======================
+    const subSteps = [
+        { // 1.1
+            title: "三北工程背景",
+            content: `<h3>🏜️ 三北工程背景</h3>
+                      <h4>· 先天脆弱的自然本底</h4>
+                      <p>我国北方坐拥<span class="bold-number">八大沙漠、四大沙地</span>，荒漠化土地面积超过 <span class="bold-number">260 万平方公里</span>，约占国土总面积的 <span class="bold-number">27%</span>。广袤荒漠肆意盘踞北疆全域，庞大的荒漠体量成为沙尘灾害滋生的根源。且三北地区年降水量少、蒸发量高，导致植被一旦破坏，土地极易沙化且难以自然恢复，生态系统极度脆弱。</p>
+                      <div id="desertPieChart" class="chart-container"></div>
+                      <div id="rainfallChart" class="chart-container"></div>
+                      <h4>· 人为破坏因素</h4>
+                      <p>建国后我国人口快速增长，为解决数亿人的吃饭、烧柴、住房等基本生存问题，人们不得不向大自然过度索取，形成了 <span class="bold">"人口增长→过度索取→生态恶化"</span> 的恶性循环。</p>
+                      <div id="populationChart" class="chart-container"></div>`,
+            view: { center: [42, 105], zoom: 3.5 }, layers: [desertMarkers], removeLayers: [beijingMarker, northwestRegion, northRegion, northeastRegion],
+            action: () => {
+                if(!map.hasLayer(desertMarkers)) desertMarkers.addTo(map);
+                loadDesertAreas(); loadSandyLands();
+                setTimeout(() => {
+                    const pieChart = echarts.init(document.getElementById('desertPieChart'));
+                    pieChart.setOption({ title: { text: '荒漠化面积占比', left: 'center' }, tooltip: { trigger: 'item' }, series: [{ type: 'pie', radius: '50%', data: [{ name: '三北地区', value: 85, itemStyle: { color: '#c45a2c' } }, { name: '其他地区', value: 15, itemStyle: { color: '#7f8c8d' } }], label: { formatter: '{b}: {d}%' } }] });
+                    const rainChart = echarts.init(document.getElementById('rainfallChart'));
+                    rainChart.setOption({ title: { text: '三北地区年降水量变化（1960-1980年）', left: 'center' }, xAxis: { data: ['1960','1965','1970','1975','1980'] }, yAxis: { name: '降水量(mm)' }, series: [{ type: 'line', data: [280,265,240,230,225], color: '#3f8e5e' }] });
+                    const popChart = echarts.init(document.getElementById('populationChart'));
+                    popChart.setOption({ title: { text: '中国总人口增长（1949-1978年）', left: 'center' }, xAxis: { data: ['1949','1955','1960','1965','1970','1975','1978'] }, yAxis: { name: '人口(亿人)' }, series: [{ type: 'line', data: [5.4,6.1,6.6,7.2,8.3,9.2,9.6], color: '#d35400' }] });
+                }, 100);
+                updateLegendForChapter(0,0);
+            },
+            cleanup: () => { removeDesertAreas(); removeSandyLands(); }
+        },
+        { // 1.2
+            title: "首次提出",
+            content: `<h3>🏛️ 1978 · 北京 · 工程启动</h3>
+                      <p>在此背景下，我国北方生态持续恶化，沙尘灾害频发。以首都北京为例，<span class="bold-number">1978 年当地全年沙尘天气多达 20 余天</span>，来自蒙古高原与内蒙古沙地的风沙沿三大路径直逼首都，敲响生态警钟。</p>
+                      <div id="beijingDustChart" class="chart-container"></div>
+                      <div class="stats-mini"><strong>左边地图上展示了沙尘暴三大传输路径：</strong><br>
+                      1️⃣ 西北主路：蒙古戈壁→内蒙古朱日和→张家口直入北京，强度最大。<br>
+                      2️⃣ 北路近源：浑善达克沙地→坝上草原→入京，距离最近。<br>
+                      3️⃣ 西路远源：新疆河西走廊→鄂尔多斯沙地→山西大同汇入北京。<br>
+                      <strong>核心根源：</strong>蒙古高原与内蒙古四大沙地，无植被屏障，冷空气南下即可长驱直入侵袭北京。</div>
+                      <h4>· 首次提出</h4>
+                      <p>频繁的风沙侵袭敲响了中华民族的生态警钟。<span class="bold-number">1978年5月</span>：国家林业总局专家向中央提交《关于营造万里防护林改造自然的意见》，正式提出<span class="bold">“北方大型防护林带”构想</span>。</p>
+                      <img class="story-img" src="./image/residenthousesoil.png"><div class="gray-text">村民在被黄沙掩埋的房屋前清理沙子的照片</div>`,
+            view: { center: [42, 105], zoom: 5 }, layers: [beijingMarker], removeLayers: [desertMarkers, northwestRegion, northRegion, northeastRegion],
+            action: () => {
+                if(!map.hasLayer(beijingMarker)) beijingMarker.addTo(map); setTimeout(() => beijingMarker.openPopup(), 500);
+                showSandStormPath(); removeDesertAreas(); removeSandyLands();
+                setTimeout(() => {
+                    const dustChart = echarts.init(document.getElementById('beijingDustChart'));
+                    dustChart.setOption({ title: { text: '北京沙尘暴日数变化（1968-1978年）', left: 'center' }, xAxis: { data: ['1968','1970','1972','1974','1976','1978'] }, yAxis: { name: '沙尘暴日数(天/年)' }, series: [{ type: 'bar', data: [18,22,25,20,23,26], itemStyle: { color: '#d35400' } }] });
+                }, 100);
+                updateLegendForChapter(0,1);
+            },
+            cleanup: () => { removeSandStormPath(); }
+        },
+        { // 1.3
+            title: "三大治理片区",
+            content: `<h3>🗺️ 三大治理片区</h3>
+                      <p>1978 年5月，国务院正式批准启动三北防护林体系建设工程。<br>
+                      工程范围横跨 <span class="bold-number">13</span> 个省、自治区、直辖市，东西横跨长度<span class="bold-number">4480公里</span>，总面积<span class="bold-number">406.9 万平方公里</span>，占国土总面积的<span class="bold-number">42.4%</span>。<br>
+                      根据区域生态特点，工程划分为西北荒漠区、黄土高原水土流失区和东北华北平原农区三大治理片区。</p>
+                      <img class="story-img" src="./image/141.jpg"><div class="gray-text">三北工程规划图</div>
+                       <div class="gray-text">点击下方按钮，查看三大治理片区的位置。</div>
+                      <div style="display:flex; gap:12px; margin:12px 0;"><button id="showNorthwest" class="region-card-btn btn-northwest">🌾 西北荒漠区</button><button id="showNorth" class="region-card-btn btn-north">⛰️ 黄土高原区</button><button id="showNortheast" class="region-card-btn btn-northeast">🌲 东北华北农区</button></div>`,
+            view: { center: [42, 105], zoom:3.5 }, layers: [northwestRegion, northRegion, northeastRegion], removeLayers: [desertMarkers, beijingMarker],
+            action: () => {
+                if(northwestRegion && !map.hasLayer(northwestRegion)) { northwestRegion.addTo(map); northRegion.addTo(map); northeastRegion.addTo(map); }
+                addStartEndPoints();
+                const setRegionActive = (layer, name, detail) => {
+                    if(activeRegionLayer && map.hasLayer(activeRegionLayer)) map.removeLayer(activeRegionLayer);
+                    if(layer && layer.toGeoJSON) { activeRegionLayer = L.geoJSON(layer.toGeoJSON(), { style: { color: "#ffaa33", weight: 4, fillColor: "#ffdd88", fillOpacity: 0.6 } }); activeRegionLayer.addTo(map); }
+                    document.getElementById('regionInfo').innerHTML = detail;
+                };
+                const northwestDetail = `<strong>🌾 西北荒漠区</strong><br>📌 涵盖：新疆、甘肃、青海、宁夏、陕西北部、内蒙古西部<br>🌤️ 气候：极端干旱，年降水<200mm，蒸发量10-30倍<br>⚠️ 问题：流动沙丘、风沙危害、水资源矛盾突出<br>🔧 重点：打好河西走廊—塔克拉玛干沙漠边缘阻击战，锁边林草带，光伏治沙，特色林果。`;
+                const loessDetail = `<strong>⛰️ 黄土高原水土流失区</strong><br>📌 涵盖：山西、陕西中北部、甘肃中东部、宁夏南部、青海东部、内蒙古中南部<br>🌤️ 气候：半干旱，降水集中多暴雨，水土流失剧烈<br>⚠️ 问题：黄河泥沙主要来源，植被退化<br>🔧 重点：加强黄河“几字弯”攻坚战，生物与工程措施结合，水土保持林。`;
+                const northeastDetail = `<strong>🌲 东北华北平原农区</strong><br>📌 涵盖：北京、天津、河北、山西东部、内蒙古东部、辽宁、吉林、黑龙江<br>🌤️ 气候：温带季风，雨热同期，粮食主产区<br>⚠️ 问题：农田防护林老化，黑土流失，草原退化<br>🔧 重点：黑土地保护，京津冀生态屏障，农田防护林网，盐碱地治理。`;
+                document.getElementById('showNorthwest').onclick = () => setRegionActive(northwestRegion, "西北荒漠区", northwestDetail);
+                document.getElementById('showNorth').onclick = () => setRegionActive(northRegion, "黄土高原水土流失区", loessDetail);
+                document.getElementById('showNortheast').onclick = () => setRegionActive(northeastRegion, "东北华北平原农区", northeastDetail);
+                const addClick = (layer, detail) => { if(layer) layer.eachLayer(l=> l.on('click',()=> setRegionActive(layer, "", detail))); };
+                addClick(northwestRegion, northwestDetail); addClick(northRegion, loessDetail); addClick(northeastRegion, northeastDetail);
+                removeDesertAreas(); removeSandyLands(); removeSandStormPath();
+                updateLegendForChapter(0,2);
+            },
+            cleanup: () => { removeStartEndPoints(); }
+        },
+        { // 1.4
+            title: "总体规划与阶段目标",
+            content: `<h3>📐 三北工程总体规划 (1978-2050)</h3>
+                      <p>治理范围尘埃落定，结合区域生态差异与治理难度，国家敲定跨世纪分步实施规划，为三北工程定下百年行动蓝图。</p>
+                      <img class="story-img" src="./image/p1.png"><div class="gray-text">国家林业草原局发布的三北工程通知</div>
+                      <h4>· 规划总体架构</h4>
+                      <p>工程从1978 年启动，至2050 年全面竣工，整体分为<span class="bold-number">3 个阶段、8 期工程</span>分步实施，循序渐进推进北方生态治理。</p>
+                      <h4>· 分阶段建设任务</h4>
+                      <table class="phase-table"><tr><th>阶段</th><th>年份</th><th>主要任务</th></tr>
+                          <tr><td>第一阶段</td><td>1978-2000</td><td>一期、二期工程，恢复植被，初步遏制沙化</td></tr>
+                          <tr><td>第二阶段</td><td>2001-2020</td><td>三至五期工程，重点治理，生态稳步改善</td></tr>
+                          <tr><td>第三阶段</td><td>2021-2050</td><td>六至八期工程，全面建成绿色长城</td></tr>
+                      </table>
+                      <h4>· 核心建设目标</h4>
+                      <p>规划总投资：<span class="bold-number">576.8 亿元</span><br>计划造林面积：<span class="bold-number">3508.3 万公顷</span><br>森林覆盖率目标：从工程启动前的 <span class="bold-number">5.05%</span> 提高到 <span class="bold-number">14.95%</span><br>最终愿景：从根本上改善三北地区生态环境，保障北方地区经济社会可持续发展</p>
+                      <div id="planChart" class="chart-container"></div>
+                      <div class="stats-mini"><strong>小结：</strong>蓝图已然绘就，规划正式落地。没有现成经验，没有先进技术，无数治沙人背起行囊，奔赴茫茫沙海，用最原始的方式，开启了人类历史上规模最大的生态建设工程。</div>`,
+            view: { center: [42, 105], zoom: 5 }, layers: [], removeLayers: [desertMarkers, beijingMarker, northwestRegion, northRegion, northeastRegion],
+            action: () => { setTimeout(() => { const pc = echarts.init(document.getElementById('planChart')); pc.setOption({ title:{ text:'三北工程森林覆盖率目标', left:'center' }, xAxis:{ data:['1978','2000','2020','2050'] }, yAxis:{ name:'%' }, series:[{ type:'line', data:[5.05,9.8,13.5,14.95], color:'#3f8e5e', areaStyle:{ opacity:0.3 } }] }); }, 100); removeDesertAreas(); removeSandyLands(); removeSandStormPath(); removeStartEndPoints(); updateLegendForChapter(0,3); }
+        }
+    ];
+    
+    // ======================= 第二章：治沙典范（子步骤0）和建设成效（子步骤1） =======================
+    let secondSubIndex = 0;
+    function renderSecondChapterSub(step) {
+        document.getElementById('globalNavButtons').style.display = 'none';
+        document.getElementById('subStepButtons').style.display = 'flex';
+        if (step === 0) {
+            // 治沙典范页面
+            document.getElementById('dynamicStory').innerHTML = `<h3>🌍1978-2020 · 三北工程治沙典范</h3>
+                <p>自 20 世纪 80 年代起，三北大地的<span class="highlight">广大群众与基层干部</span>扎根荒漠，投身治沙造林事业。数十年间涌现出无数<span class="highlight">可歌可泣的治沙英雄与模范事迹</span>，书写了人类治沙史上的壮丽篇章。</p>
+                <p><h4>· 治沙典范：</h4>点击下方地点名称查看详情。</p>
+                <div id="accordionContainer" style="margin: 16px 0;"></div>
+                <h4>· 精神传承</h4>
+                <p>从新疆柯柯牙、甘肃八步沙，到宁夏沙坡头、内蒙古库布其、河北塞罕坝，一代代人接力坚守，在艰苦环境中摸索造林固沙技术，以岁月坚守换来片片绿洲，凝聚起<span class="highlight">代代相传的治沙精神</span>。</p>
+                <img class="story-img" src="./image/spirit.jpg"><div class="gray-text">“<strong>三北精神</strong>”宣传片</div>
+                `;
+            const container = document.getElementById('accordionContainer');
+            container.innerHTML = '';
+            casePoints.forEach(p => {
+                const item = document.createElement('div'); item.className = 'accordion-item';
+                item.innerHTML = `<div class="accordion-header"><div class="title"><span class="legend-color" style="background:#2ecc71;"></span> <strong>${p.name}</strong> <span style="font-size:0.8rem;">(${p.year})</span></div><div class="arrow"><i class="fas fa-chevron-right"></i></div></div><div class="accordion-content"><img src="${p.img}" style="width:100%; border-radius:16px; margin-bottom:12px;"><p>${p.desc}</p><div class="stats-mini">📅 治理时期：${p.year}</div></div>`;
+                const header = item.querySelector('.accordion-header');
+                header.addEventListener('click', () => {
+                    document.querySelectorAll('#accordionContainer .accordion-item').forEach(i=>i.classList.remove('active'));
+                    item.classList.add('active');
+                    map.flyTo([p.lat, p.lng], 9, { duration:1 });
+                    setTimeout(() => { const marker = secondChapterMarkers.getLayers().find(l=>{ const ll=l.getLatLng(); return Math.abs(ll.lat-p.lat)<0.01 && Math.abs(ll.lng-p.lng)<0.01; }); if(marker) marker.openPopup(); }, 1000);
+                });
+                container.appendChild(item);
+            });
+            if (!map.hasLayer(secondChapterMarkers)) secondChapterMarkers.addTo(map);
+            document.getElementById('prevSubBtn').innerHTML = '<i class="fas fa-arrow-left"></i> 上一步';
+            document.getElementById('nextSubBtn').innerHTML = '下一步 <i class="fas fa-arrow-right"></i>';
+            document.getElementById('prevSubBtn').onclick = () => { switchToChapter(0); currentSub = subSteps.length-1; renderSubStep(currentSub); };
+            document.getElementById('nextSubBtn').onclick = () => { secondSubIndex = 1; renderSecondChapterSub(1); };
+            updateLegendForChapter(1,0);
+        } else {
+            // 建设成效页面（独立一页）
+            document.getElementById('dynamicStory').innerHTML = `<h3>📊 三北工程 · 建设成效</h3>
+                <p><h4>总体成效：</h4>1978 年至 2022 年间，三北工程分期稳步落地实施，造林面积持续扩增，沙化土地逐年缩减，实现了生态环境持续性向好转变。</p>
+                <div id="achievementChart2" style="height:180px; margin:12px 0;"></div>
+                <div class="stats-mini" style="text-align:center; margin-bottom:8px;"><h4>✨ 第二期规划超额完成 ✨</h4></div>
+                <div class="achievement-grid">
+                    <div class="achievement-card"><div class="achievement-label">森林覆盖率达到</div><div class="achievement-number">13.84%</div><div class="achievement-sub">1977年5.05% → 2023年</div></div>
+                    <div class="achievement-card"><div class="achievement-label">累计造林保存面积</div><div class="achievement-number">4.8亿亩</div></div>
+                    <div class="achievement-card"><div class="achievement-label">治理退化草原</div><div class="achievement-number">12.8亿亩</div></div>
+                    <div class="achievement-card"><div class="achievement-label">水土流失治理面积</div><div class="achievement-number">6.7亿亩</div></div>
+                    <div class="achievement-card"><div class="achievement-label">水土流失面积有效控制</div><div class="achievement-number">61%</div></div>
+                    <div class="achievement-card"><div class="achievement-label">农田得到有效保护</div><div class="achievement-number">4.5亿亩</div></div>
+                </div>
+                <div class="gray-text">数据来源：国家林草局 · 三北工程40多年建设成果</div>
+                <div class="transition-card"><strong>小结：</strong>历经四十余年扎根实干，北方生态根基基本筑牢，基础治沙任务取得阶段性胜利，但<span class="bold">重度沙区治理难题</span>依旧棘手，生态治理进入<span class="bold">攻坚瓶颈期</span>，新时代攻坚行动顺势而生。</div>`;
+            setTimeout(() => {
+                const chart = echarts.init(document.getElementById('achievementChart2'));
+                chart.setOption({ title: { text:'三北工程森林覆盖率变化', left:'center' }, xAxis:{ data:['1977','2000','2010','2020','2023'] }, yAxis:{ name:'森林覆盖率(%)' }, series:[{ type:'line', data:[5.05,9.8,12.41,13.84,13.84], smooth:true, lineStyle:{ color:'#3f8e5e', width:3 }, areaStyle:{ opacity:0.3 } }] });
+            }, 100);
+            document.getElementById('prevSubBtn').innerHTML = '<i class="fas fa-arrow-left"></i> 上一步';
+            document.getElementById('nextSubBtn').innerHTML = '下一章 <i class="fas fa-arrow-right"></i>';
+            document.getElementById('prevSubBtn').onclick = () => { secondSubIndex = 0; renderSecondChapterSub(0); };
+            document.getElementById('nextSubBtn').onclick = () => { switchToChapter(2); };
+            updateLegendForChapter(1,1);
+        }
+    }
+    
+    // ======================= 第三章 =======================
+    const thirdChapter = {
+        name: "⚔️ 第三章 · 高潮 | 新时代冲锋",
+        year: "2023-", view: { center: [42, 105], zoom: 3.5 }, layers: [battleLayer, yellowRiverLayer], removeLayers: [secondChapterMarkers],
+        content: `<h3>⚔️ 2023 年・打响三大战役</h3>
+                  <p>三期启新程，攻坚再出发。2023 年 6 月 6 日，习近平总书记在内蒙古巴彦淖尔市发出总动员令，部署 “三北” 工程三大标志性战役，新时代防沙治沙攻坚战全面打响。</p>
+                  <img class="story-img" src="./image/31pre.png">
+                  <div class="gray-text">6月5日至6日，习近平在内蒙古巴彦淖尔考察，并主持召开加强荒漠化综合防治和推进“三北”等重点生态工程建设座谈会。</div>
+                  <h4>· 三大标志性战役</h4>
+                  <div id="battleAccordion" style="margin:16px 0;"></div>
+                  <div class="gray-text">说明：地图上彩色半透明区域为三大战役范围，蓝色线条为黄河干流。</div>
+                  <div class="transition-card"><strong>章节过渡：</strong>2023 年三大战役全面铺开，传统治沙模式迎来全面革新，工程迈入<span class="bold">科技赋能、生态富民</span>同步推进的全新发展时期。</div>`,
+        afterRender: async () => {
+            removeDesertAreas(); removeSandyLands(); removeSandStormPath(); removeStartEndPoints();
+            await loadYellowRiver();
+            updateLegendForChapter(2);
+            const battles = [
+                { name: "黄河“几字弯”攻坚战", coords: [39.5, 108.5], zoom: 7, desc: "🔴 定位：筑牢黄河中游生态屏障的关键一役。<br>🎯 核心目标：治理水土流失，大幅减少入黄泥沙。<br>📍 覆盖区域：宁夏、内蒙古、陕西、山西四省区，聚焦黄河“几字弯”多沙粗沙区。" },
+                { name: "科尔沁、浑善达克沙地歼灭战", coords: [43.5, 118.5], zoom: 7, desc: "🟠 定位：守护京津冀风沙源的核心战场。<br>🎯 核心目标：实现两大沙地整体“绿进沙退”，歼灭可治理沙化土地。<br>📍 覆盖区域：内蒙古东部、辽吉冀北部，筑牢首都生态安全屏障。" },
+                { name: "河西走廊—塔克拉玛干沙漠边缘阻击战", coords: [40.5, 95.0], zoom: 6.5, desc: "🟢 定位：守住绿洲安全边界的前沿防线。<br>🎯 核心目标：遏制沙漠扩张，构建沙漠边缘锁边防护带。<br>📍 覆盖区域：甘肃河西走廊、新疆塔里木盆地周边，守护丝路生态走廊。" }
+            ];
+            const container = document.getElementById('battleAccordion');
+            container.innerHTML = '';
+            battles.forEach((b,idx) => {
+                const item = document.createElement('div'); item.className = 'accordion-item';
+                item.innerHTML = `<div class="accordion-header"><div class="title"><span class="legend-color" style="background:${idx===0?'#e63946':(idx===1?'#f4a261':'#2a9d8f')};"></span> <strong>${b.name}</strong></div><div class="arrow"><i class="fas fa-chevron-right"></i></div></div><div class="accordion-content"><p>${b.desc}</p></div>`;
+                const header = item.querySelector('.accordion-header');
+                header.addEventListener('click', () => {
+                    document.querySelectorAll('#battleAccordion .accordion-item').forEach(i=>i.classList.remove('active'));
+                    item.classList.add('active');
+                    map.flyTo(b.coords, b.zoom, { duration:1.2 });
+                    setTimeout(() => {
+                        const target = battleLayer.getLayers().find(layer => { const pop = layer.getPopup(); return pop && pop.getContent() && pop.getContent().includes(b.name.slice(0,6)); });
+                        if (target) target.openPopup();
+                    }, 1000);
+                });
+                container.appendChild(item);
+            });
+            document.getElementById('globalNavButtons').style.display = 'flex';
+            document.getElementById('subStepButtons').style.display = 'none';
+        }
+    };
+    
+    // ======================= 第四章 =======================
+    const fourthChapter = {
+        name: "🌿 第四章 · 未来 | 共享绿色长城",
+        year: "2030-2050",
+        view: { center: [42, 105], zoom: 5 },
+        layers: [],
+        removeLayers: [secondChapterMarkers, battleLayer, yellowRiverLayer],
+        content: `<h3>🌿 未来 · 共享绿色长城</h3>
+                  <p>步入新时代，三北工程彻底跳出单一防沙治沙思维，以全新理念引领生态治理，通过科技创新实现生态价值转化，向着绿满北疆、生态惠民的百年愿景稳步迈进。</p>
+                  <h4>· 理念升级：三绿并举、四库联动</h4>
+                  <p>工程坚持 <strong>“扩绿、兴绿、护绿”一体发展</strong>，统筹推进<strong>“水库、钱库、粮库、碳库”四库建设</strong>，实现生态保护、经济发展、民生改善与碳汇提升的多元价值协同。</p>
+                  <h4>· 创新模式：生态价值转化</h4>
+                  <p>各地结合自身特点探索出一批可复制、可推广的现代化治沙新模式，让荒漠变成了聚宝盆：</p>
+                  <div id="innovationAccordion" style="margin:16px 0;"></div>
+                  <h4>· 目标与展望</h4>
+                  <div class="goal-container">
+                      <div class="goal-item"><strong>2030 年</strong>：稳步完成阶段性建设任务，三大标志性战役取得决定性胜利</div>
+                      <div class="goal-item"><strong>2050 年</strong>：工程整体收官，完整稳固的北方生态防护林体系全面建成，区域生态实现良性循环，达成绿满北疆、生态惠民的百年建设愿景</div>
+                  </div>
+                  <img class="story-img" src="./image/fsum.png">
+                  <div class="gray-text">山西省吕梁山地区通过实施“三北”等重点生态工程，持续推进防风固沙林、水土保持林、水源涵养林建设。图为昔日黄土漫天、“灰头土脸”的吕梁山如今呈现出群山叠翠、绿茵盎然的生态美景。</div>
+                  <div class="summary-card">
+                      回望这场跨越半个多世纪的绿色长征，从 1978 年顺应时代需求立项动工，历经四十余年久久为功的实干深耕，到 2023 年开启新时代三大战役攻坚征程，最终奔赴 2050 年百年生态愿景。三北工程一步一个脚印完成了北方大地从 <strong>"沙进人退" 到 "绿进沙退"</strong> 的历史性转变，不仅铸就了震撼世界的绿色长城奇迹，更为全球荒漠化治理和生态修复提供了宝贵的中国智慧与中国方案。
+                  </div>`,
+        afterRender: () => {
+            setTimeout(() => {
+                const f = echarts.init(document.getElementById('futureChart'));
+                f.setOption({ title: { text: '三北碳汇预测 (亿吨/年)', left: 'center' }, xAxis: { data: ['2025','2030','2040','2050'] }, series: [{ type: 'bar', data: [1.2,2.5,4.0,6.2], itemStyle: { color: '#428b54' } }] });
+            }, 100);
+            removeDesertAreas(); removeSandyLands(); removeSandStormPath(); removeStartEndPoints();
+            addInnovationMarkers();
+            // 构建创新模式风琴
+            const innovations = [
+                { title: "🔆 内蒙古 · 库布其沙漠“光伏长城”模式", lat: 40.5, lng: 108.6, zoom:8, desc: "2022年12月开工，2023年11月核心项目并网。位于库布其沙漠北缘，绵延近400公里，采用“板上发电、板下植绿、板间养殖”一地多用模式，建成全国单体规模最大的200万千瓦光伏治沙项目，同步修复治理沙漠10万亩，项目区植被覆盖度达80%，年均生产绿电约41亿千瓦时，年减排二氧化碳约319万吨。", img: "./image/light.jpg" },
+                { title: "💧 甘肃 · 张掖高台县“中水回用造林”模式", lat: 39.4, lng: 99.8, zoom:10, desc: "2024年建成调蓄塘坝，2025年春全面投用。将县城污水处理厂中水变废为宝，建成19.8万立方米调蓄塘坝和20公里地下输水管网，开辟戈壁造林“第二水源”。实施人工造林7361亩，林木成活率从不足30%跃升至90%以上，每年节约优质水资源300多万吨。", img: "./image/42.jpg" },
+                { title: "🌱 宁夏 · 中卫“草方格沙结皮”技术", lat: 37.5, lng: 105.1, zoom:9, desc: "2025年开始大规模推广。中国科学院沙坡头站研发“草方格+人工蓝藻沙结皮”技术，将自然形成生物土壤结皮的时间从10年缩短至3年左右；同时创新刷状网绳式草方格，施工效率提高60%，使用寿命从2-3年延长至5-6年。", img: "./image/43.png", img2: "./image/432.png", multi: true },
+                { title: "❄️ 黑龙江 · 大庆“极寒盐碱地治理”模式", lat: 46.6, lng: 125.1, zoom:9, desc: "2024年形成成熟技术体系，2025年获国家项目支持。探索出“一优三改”和“1+3+N”综合治理模式，重度盐碱草原治理区植被盖度从48.1%提升至75%，干草亩产量从52.8公斤提高到102公斤。2025年获批国家项目，治理重度盐碱化草原3.65万余亩，为全球极寒苏打盐碱地治理提供“中国方案”。", imgBefore: "./image/442.jpg", imgAfter: "./image/44.jpg", multiBeforeAfter: true }
+            ];
+            const container = document.getElementById('innovationAccordion');
+            container.innerHTML = '';
+            innovations.forEach((item, idx) => {
+                const accordion = document.createElement('div'); accordion.className = 'innovation-item';
+                let btnHtml = `<button class="locate-btn" data-lat="${item.lat}" data-lng="${item.lng}" data-zoom="${item.zoom}">📍 定位</button>`;
+                let contentHtml = `<p>${item.desc}</p>`;
+                if (item.img) contentHtml += `<img src="${item.img}" style="width:100%; border-radius:12px; margin-top:8px;">`;
+                if (item.multi && item.img && item.img2) contentHtml += `<div class="img-grid"><img src="${item.img}"><img src="${item.img2}"></div>`;
+                if (item.multiBeforeAfter && item.imgBefore && item.imgAfter) contentHtml += `<div class="img-grid"><img src="${item.imgBefore}"><img src="${item.imgAfter}"></div>`;
+                accordion.innerHTML = `<div class="innovation-header"><div class="title">${item.title}</div><div style="display:flex; gap:8px; align-items:center;"><span class="arrow"><i class="fas fa-chevron-right"></i></span>${btnHtml}</div></div><div class="innovation-content">${contentHtml}</div>`;
+                const header = accordion.querySelector('.innovation-header');
+                header.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('locate-btn')) return;
+                    accordion.classList.toggle('active');
+                });
+                const locateBtn = accordion.querySelector('.locate-btn');
+                if (locateBtn) {
+                    locateBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const lat = parseFloat(locateBtn.dataset.lat);
+                        const lng = parseFloat(locateBtn.dataset.lng);
+                        const zoom = parseInt(locateBtn.dataset.zoom) || 8;
+                        map.flyTo([lat, lng], zoom, { duration: 1.2 });
+                        setTimeout(() => {
+                            const marker = innovationMarkers.getLayers().find(m => { const ll = m.getLatLng(); return Math.abs(ll.lat - lat) < 0.1 && Math.abs(ll.lng - lng) < 0.1; });
+                            if (marker) marker.openPopup();
+                        }, 1200);
+                    });
+                }
+                container.appendChild(accordion);
+            });
+            updateLegendForChapter(3);
+            document.getElementById('globalNavButtons').style.display = 'flex';
+            document.getElementById('subStepButtons').style.display = 'none';
+        }
+    };
+    
+    // ======================= 全局状态管理 =======================
+    let currentChapter = 0, currentSub = 0, isChapterOneSubMode = true;
+    
+    function clearAllLayers() {
+        const allLayers = [secondChapterMarkers, battleLayer, yellowRiverLayer, desertMarkers, beijingMarker, northwestRegion, northRegion, northeastRegion, innovationMarkers, startEndLayer];
+        allLayers.forEach(layer => { if(layer && map.hasLayer(layer)) map.removeLayer(layer); });
+        if(activeRegionLayer && map.hasLayer(activeRegionLayer)) map.removeLayer(activeRegionLayer);
+        removeDesertAreas(); removeSandyLands(); removeSandStormPath(); removeInnovationMarkers(); removeStartEndPoints();
+    }
+    
+    function renderSubStep(index) {
+        const step = subSteps[index];
+        document.getElementById('dynamicStory').innerHTML = step.content;
+        clearAllLayers();
+        if(step.layers) step.layers.forEach(layer => { if(layer && !map.hasLayer(layer)) layer.addTo(map); });
+        if(step.action) step.action();
+        map.flyTo(step.view.center, step.view.zoom, { duration: 1 });
+        document.getElementById('globalNavButtons').style.display = 'none';
+        document.getElementById('subStepButtons').style.display = 'flex';
+        const nextSubBtn = document.getElementById('nextSubBtn');
+        if(index === subSteps.length-1) nextSubBtn.innerHTML = '开启下一章 <i class="fas fa-forward"></i>';
+        else nextSubBtn.innerHTML = '下一步 <i class="fas fa-arrow-right"></i>';
+        document.querySelectorAll('.step-item').forEach((item,i)=>{ if(i===0) item.classList.add('active'); else item.classList.remove('active'); });
+        document.getElementById('timelineSlider').value = 0;
+        document.getElementById('timeLabel').innerText = '第一章 · 危机';
+        document.getElementById('prevSubBtn').onclick = () => { if(currentSub > 0) { currentSub--; renderSubStep(currentSub); } };
+        document.getElementById('nextSubBtn').onclick = () => { if(currentSub < subSteps.length-1) { currentSub++; renderSubStep(currentSub); } else { switchToChapter(1); } };
+    }
+    
+    function renderNormalChapter(index) {
+        if (index === 1) {
+            secondSubIndex = 0; renderSecondChapterSub(0);
+        } else if (index === 2) {
+            const ch = thirdChapter;
+            document.getElementById('dynamicStory').innerHTML = ch.content;
+            clearAllLayers();
+            if(ch.layers) ch.layers.forEach(layer => { if(layer && !map.hasLayer(layer)) layer.addTo(map); });
+            map.flyTo(ch.view.center, ch.view.zoom, { duration: 1 });
+            if(ch.afterRender) ch.afterRender();
+        } else if (index === 3) {
+            const ch = fourthChapter;
+            document.getElementById('dynamicStory').innerHTML = ch.content;
+            clearAllLayers();
+            if(ch.layers) ch.layers.forEach(layer => { if(layer && !map.hasLayer(layer)) layer.addTo(map); });
+            map.flyTo(ch.view.center, ch.view.zoom, { duration: 1 });
+            if(ch.afterRender) ch.afterRender();
+        }
+        document.querySelectorAll('.step-item').forEach((item,i)=>{ if(i===index) item.classList.add('active'); else item.classList.remove('active'); });
+        document.getElementById('timelineSlider').value = index;
+        const yearMap = ["第一章 · 危机", "第二章 · 发展", "第三章 · 高潮", "第四章 · 未来"];
+        document.getElementById('timeLabel').innerText = yearMap[index];
+    }
+    
+    function switchToChapter(chapterIdx) {
+        currentChapter = chapterIdx;
+        if(chapterIdx === 0) { isChapterOneSubMode = true; currentSub = 0; renderSubStep(0); }
+        else { isChapterOneSubMode = false; renderNormalChapter(chapterIdx); }
+    }
+    
+    function globalPrevChapter() {
+        if (currentChapter === 1 && secondSubIndex === 0) {
+            switchToChapter(0); currentSub = subSteps.length-1; renderSubStep(currentSub);
+        } else if (currentChapter === 1 && secondSubIndex === 1) {
+            secondSubIndex = 0; renderSecondChapterSub(0);
+        } else if (currentChapter > 0) {
+            switchToChapter(currentChapter-1);
+        }
+    }
+    function globalNextChapter() {
+        if (currentChapter === 1 && secondSubIndex === 1) switchToChapter(2);
+        else if (currentChapter === 0) switchToChapter(1);
+        else if (currentChapter === 2) switchToChapter(3);
+    }
+    
+    // UI绑定
+    const stepNav = document.getElementById('stepNav');
+    const chapNames = ["第一章 · 危机", "第二章 · 发展", "第三章 · 高潮", "第四章 · 未来"];
+    chapNames.forEach((name, idx) => {
+        const btn = document.createElement('div'); btn.className = 'step-item'; if(idx===0) btn.classList.add('active');
+        btn.innerHTML = `<i class="fas ${idx===0?'fa-exclamation-triangle':(idx===1?'fa-tree':(idx===2?'fa-flag-checkered':'fa-seedling'))}"></i> ${name}`;
+        btn.onclick = () => switchToChapter(idx);
+        stepNav.appendChild(btn);
+    });
+    document.getElementById('prevChapterBtn').onclick = globalPrevChapter;
+    document.getElementById('nextChapterBtn').onclick = globalNextChapter;
+    document.getElementById('timelineSlider').oninput = (e) => switchToChapter(parseInt(e.target.value));
+    
+    // 开场动画
+    const slides = [
+        { text: "在祖国北疆，一道绵延4480公里的绿色长城，横亘西北、华北、东北，锁住漫天黄沙，守护万里河山，缔造出世界生态工程的奇迹。", bgImage: "./image/3.png" },
+        { text: "可谁能想到，如今的绿色家园，曾是黄沙肆虐、生态告急的绝望之地。沙漠步步紧逼，良田不断被吞噬，水土流失愈演愈烈，北方生态防线岌岌可危。", bgImage: "./image/2.png" },
+        { text: "从黄沙漫天到绿意绵延，从沙进人退到人进沙退，这场跨越半世纪的绿色保卫战，究竟如何书写奇迹？点击开启地图故事", bgImage: "./image/6.jpg" }
+    ];
+    let currentSlide = 0;
+    const introOverlay = document.getElementById('introOverlay');
+    const introText = document.getElementById('introText');
+    const introSlideDiv = document.getElementById('introSlide');
+    const prevSlideBtn = document.getElementById('introPrevBtn');
+    const nextSlideBtn = document.getElementById('introNextBtn');
+    const skipBtn = document.getElementById('introSkipBtn');
+    const dotsContainer = document.getElementById('introDots');
+    function updateSlideUI() {
+        const slide = slides[currentSlide];
+        introText.innerText = slide.text;
+        introSlideDiv.style.backgroundImage = `url(${slide.bgImage})`;
+        document.querySelectorAll('.dot').forEach((dot,idx)=>{ if(idx===currentSlide) dot.classList.add('active'); else dot.classList.remove('active'); });
+        if(currentSlide === slides.length-1) nextSlideBtn.innerHTML = '开启旅程 <i class="fas fa-play"></i>';
+        else nextSlideBtn.innerHTML = '下一页 <i class="fas fa-chevron-right"></i>';
+    }
+    function nextSlide() { if(currentSlide < slides.length-1) { currentSlide++; updateSlideUI(); } else { closeIntro(); } }
+    function prevSlide() { if(currentSlide > 0) { currentSlide--; updateSlideUI(); } }
+    function closeIntro() { introOverlay.style.opacity='0'; setTimeout(()=>{ introOverlay.style.display='none'; switchToChapter(0); }, 600); }
+    for(let i=0;i<slides.length;i++) { const dot=document.createElement('div'); dot.classList.add('dot'); if(i===0) dot.classList.add('active'); dot.addEventListener('click',()=>{ currentSlide=i; updateSlideUI(); }); dotsContainer.appendChild(dot); }
+    prevSlideBtn.onclick = prevSlide;
+    nextSlideBtn.onclick = nextSlide;
+    skipBtn.onclick = closeIntro;
+    updateSlideUI();
+    
+    buildDesertMarkers();
+    buildSecondChapter();
+    createBattleZones();
+    setTimeout(() => { updateLegendForChapter(0,0); }, 200);
+</script>
+</body>
+</html>
